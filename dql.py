@@ -7,10 +7,32 @@ from collections import deque
 
 # Environment simulation
 class KubernetesEnv:
-    def __init__(self, num_nodes=5):
-        self.num_nodes = num_nodes
-        self.response_timeout = 5
-        self.reset()
+    def __init__(self, num_nodes=5, readFile=False):
+        if readFile:
+            testFile = open("testData.txt", "r")
+            self.num_nodes = int(testFile.readline())
+            self.nodes = []
+            for i in range(self.num_nodes):
+                self.nodes.append({
+                    'cpu': float(testFile.readline()),
+                    'gpu': float(testFile.readline()),
+                    'ram': float(testFile.readline()),
+                    'response_time': 0
+                })
+            self.num_pods = int(testFile.readline())
+            self.pods = []
+            for i in range(self.num_pods):
+                self.pods.append(KubernetesPod())
+                self.pods[i].cpu = float(testFile.readline())
+                self.pods[i].gpu = float(testFile.readline())
+                self.pods[i].ram = float(testFile.readline())
+                self.pods[i].response_time_factor = float(testFile.readline())
+            testFile.close()
+            self.response_timeout = 5
+        else:
+            self.num_nodes = num_nodes
+            self.response_timeout = 5
+            self.reset()
 
     def reset(self):
         self.nodes = [self._generate_node_resources() for _ in range(self.num_nodes)]
@@ -45,8 +67,8 @@ class KubernetesEnv:
             node['gpu'] += self.pod['gpu']
             node['ram'] += self.pod['ram']
             node['response_time'] += self.pod['response_time_factor']
-            self.podClass.assigned_node = action
-            reward = 2**(self.response_timeout - node['response_time']) + (1 - node['cpu']) + (1 - node['gpu']) + (1 - node['ram']) - 128
+            self.podClass.assigned_node.append(action)
+            reward = (self.response_timeout - node['response_time']) * (1 - node['cpu']) * (1 - node['gpu']) * (1 - node['ram'])
         else:
             done = True
             for node in self.nodes:
@@ -54,7 +76,7 @@ class KubernetesEnv:
                     done = False
             if done:
                 return self._get_state(), 0, True, {}
-            reward = -128
+            reward = -5
         return self._get_state(), reward, False, {}
 
     def __str__(self):
@@ -62,11 +84,11 @@ class KubernetesEnv:
 
 class KubernetesPod:
     def __init__(self):
-        self.cpu = random.uniform(0, 0.4)
-        self.gpu = random.uniform(0, 0.4)
-        self.ram = random.uniform(0, 0.4)
+        self.cpu = random.uniform(0, 0.5)
+        self.gpu = random.uniform(0, 0.5)
+        self.ram = random.uniform(0, 0.5)
         self.response_time_factor = random.uniform(0, 0.6)
-        self.assigned_node = None
+        self.assigned_node = []
 
     def __str__(self):
         return f"CPU: {self.cpu:.2f}, GPU: {self.gpu:.2f}, RAM: {self.ram:.2f}"
@@ -84,21 +106,27 @@ class KubernetesPod:
         return self.assigned_node
 
 class DefaultScheduler:
-    def __init__(self, env):
-        self.env = env
+    def __init__(self, _env):
+        self.env = _env
 
-    def schedule(self, pod):
-        self.env.nodes = self.env.nodes.sort(key=lambda x: x['cpu'] + x['gpu'] + x['ram'])
-        for i, node in enumerate(self.env.nodes):
+    def schedule(self, pod, classPod):
+        self.actNodes = []
+        for i, el in enumerate(self.env.nodes):
+            self.actNodes.append((i, el))
+        self.actNodes.sort(key=lambda x: x[1]['response_time'] + x[1]['cpu'] + x[1]['gpu'] + x[1]['ram'])
+        for actNode in self.actNodes:
+            node = actNode[1]
+            indice = actNode[0]
             if (node['cpu'] + pod['cpu'] <= 1 and
                 node['gpu'] + pod['gpu'] <= 1 and
-                node['ram'] + pod['ram'] <= 1):
-                node['cpu'] += pod['cpu']
-                node['gpu'] += pod['gpu']
-                node['ram'] += pod['ram']
-                node['response_time'] += pod['response_time_factor']
-                pod['assigned_node'] = i
-                return i
+                node['ram'] + pod['ram'] <= 1 and
+                node['response_time'] + pod['response_time_factor'] <= self.env.response_timeout):
+                self.env.nodes[indice]['cpu'] += pod['cpu']
+                self.env.nodes[indice]['gpu'] += pod['gpu']
+                self.env.nodes[indice]['ram'] += pod['ram']
+                self.env.nodes[indice]['response_time'] += pod['response_time_factor']
+                classPod.assigned_node.append(indice)
+                return indice
         return -1
 
 class DQN(nn.Module):
@@ -174,7 +202,7 @@ if option == "1":
     nameFile = input("Enter the name of the file to save the model:")
     nameFile = nameFile + ".pth"
     # Initialize Kubernetes environment
-    env = KubernetesEnv(num_nodes=10)
+    env = KubernetesEnv(num_nodes=5)
     state_size = len(env.reset())  # State space size
     action_size = env.num_nodes  # Action space size
     agent = DQNAgent(state_size, action_size)
@@ -202,7 +230,22 @@ elif option == "2":
     nameFile = input("Enter the name of the file to load the model:")
     nameFile = nameFile
     # Initialize Kubernetes environment
-    env = KubernetesEnv(num_nodes=10)
+    env = KubernetesEnv(num_nodes=5, readFile=True)
+    # GET SAMPLE DATA
+    # testFile = open("testData.txt", "w")
+    # testFile.write(len(env.nodes).__str__() + "\n")
+    # for node in env.nodes:
+    #     testFile.write(node['cpu'].__str__() + "\n")
+    #     testFile.write(node['gpu'].__str__() + "\n")
+    #     testFile.write(node['ram'].__str__() + "\n")
+    # testFile.write(len(env.pods).__str__() + "\n")
+    # for pod in env.pods:
+    #     testFile.write(pod.cpu.__str__() + "\n")
+    #     testFile.write(pod.gpu.__str__() + "\n")
+    #     testFile.write(pod.ram.__str__() + "\n")
+    #     testFile.write(pod.response_time_factor.__str__() + "\n")
+    # testFile.close()
+    #
     state_size = len(env.reset())
     action_size = env.num_nodes
     agent = DQNAgent(state_size, action_size)
@@ -211,10 +254,7 @@ elif option == "2":
     # Testing the trained agent
     state = env.reset()
     # copy values to test against default scheduler
-    default_state = state.__copy__()
-    default_state_size = len(default_state)
-    default_action_size = env.num_nodes
-    default_nodes = env.nodes
+    print("DQN Scheduler")
     for time in range(100):  # Test for 20 steps
         # print state
         action = agent.act(state)  # Agent selects action
@@ -228,13 +268,15 @@ elif option == "2":
             for node in env.nodes:
                 print(node)
             break
+    print("Default Scheduler")
+    env = KubernetesEnv(num_nodes=5, readFile=True)
     default_scheduler = DefaultScheduler(env)
-    env.nodes = default_nodes
     for time in range(100):
-        action = default_scheduler.schedule(env.pod)
-        env.pod = env.pods[random.randint(0, len(env.pods) - 1)].getState()
-        print(f"Default Step {time}: Action {action}, Reward {reward}")
-        if action == -1 or time == 19:
+        classPod = env.pods[random.randint(0, len(env.pods) - 1)]
+        env.pod = classPod.getState()
+        action = default_scheduler.schedule(env.pod, classPod)
+        print("Binded pod to node: ", action)
+        if action == -1:
             for pod in env.pods:
                 print(pod.getAssignedNode(), sep=" ")
             print("Nodes:")
