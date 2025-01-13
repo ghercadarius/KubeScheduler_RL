@@ -1,4 +1,6 @@
 import random
+from datetime import datetime
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -253,21 +255,30 @@ elif option == "2":
     agent.model.eval()
     # Testing the trained agent
     state = env.reset()
+    # get current date and time in the format: YYYYMMDDHHMMSS
+    resultsName = datetime.now().strftime("%Y%m%d%H%M%S") + "res.txt"
+    testResults = open(resultsName, "w")
     # copy values to test against default scheduler
     print("DQN Scheduler")
+    testResults.write("DQN Scheduler\n")
     for time in range(100):  # Test for 20 steps
         # print state
         action = agent.act(state)  # Agent selects action
         next_state, reward, done, _ = env.step(action)  # Execute action
         print(f"Step {time}: Action {action}, Reward {reward}")
+        testResults.write(f"Step {time}: Action {action}, Reward {reward}\n")
         state = next_state  # Update state
         if done:
             for pod in env.pods:
                 print(pod.getAssignedNode(), sep=" ")
+                testResults.write(pod.getAssignedNode().__str__() + "\n")
+            testResults.write("Nodes:\n")
             print("Nodes:")
             for node in env.nodes:
+                testResults.write(node.__str__() + "\n")
                 print(node)
             break
+    testResults.write("Default Scheduler\n")
     print("Default Scheduler")
     env = KubernetesEnv(num_nodes=5, readFile=True)
     default_scheduler = DefaultScheduler(env)
@@ -275,11 +286,16 @@ elif option == "2":
         classPod = env.pods[random.randint(0, len(env.pods) - 1)]
         env.pod = classPod.getState()
         action = default_scheduler.schedule(env.pod, classPod)
+        testResults.write("Binded pod to node: " + action.__str__() + "\n")
         print("Binded pod to node: ", action)
         if action == -1:
             for pod in env.pods:
+                testResults.write(pod.getAssignedNode().__str__() + "\n")
                 print(pod.getAssignedNode(), sep=" ")
+            testResults.write("Nodes:\n")
             print("Nodes:")
             for node in env.nodes:
+                testResults.write(node.__str__() + "\n")
                 print(node)
             break
+    testResults.close()
