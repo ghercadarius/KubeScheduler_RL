@@ -2,17 +2,14 @@ import random
 from datetime import datetime
 
 import numpy as np
-import torch
-import torch.nn as nn
-import torch.optim as optim
-from collections import deque
+import pickle
 
 # Environment simulation
 class KubernetesEnv:
     def __init__(self, num_nodes=5, readFile=False):
         if readFile:
             self.read_from_file = True
-            testFile = open("testData.txt", "r")
+            testFile = open("testDataQLearning.txt", "r")
             self.num_nodes = int(testFile.readline())
             self.nodes = []
             for i in range(self.num_nodes):
@@ -139,85 +136,47 @@ class DefaultScheduler:
                 return indice
         return -1
 
-class DQL(nn.Module):
-    def __init__(self, state_size, action_size):
-        super(DQL, self).__init__()
-        # First hidden layer with 128 neurons
-        self.fc1 = nn.Linear(state_size, 128)
-        # Second hidden layer with 128 neurons
-        self.fc2 = nn.Linear(128, 128)
-        # Output layer with size equal to number of possible actions
-        self.fc3 = nn.Linear(128, action_size)
-
-    def forward(self, x):
-        # Forward pass with ReLU activations
-        x = torch.relu(self.fc1(x))
-        x = torch.relu(self.fc2(x))
-        return self.fc3(x)
-
-
 # Agent using DQN for learning
-class DQLAgent:
+class QAgent:
     def __init__(self, state_size, action_size):
         self.state_size = state_size  # Size of the state space
         self.action_size = action_size  # Size of the action space
-        self.memory = deque(maxlen=2000)  # Replay memory
-        self.gamma = 0.95  # Discount factor for future rewards
         self.epsilon = 1.0  # Initial exploration rate
         self.epsilon_min = 0.01  # Minimum exploration rate
         self.epsilon_decay = 0.995  # Decay rate for exploration
         self.learning_rate = 0.001  # Learning rate for optimizer
-        self.model = DQL(state_size, action_size)  # Q-Network
-        self.optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
-        self.loss_fn = nn.MSELoss()  # Mean Squared Error loss function
-
-    # Store experience in replay memory
-    def remember(self, state, action, reward, next_state, done):
-        self.memory.append((state, action, reward, next_state, done))
+        self.discount_factor = 0.95  # Discount factor for future rewards
+        self.q_table = {} # Q-value table
 
     # Choose action using epsilon-greedy strategy
     def act(self, state):
+        state = tuple(state)
         if np.random.rand() <= self.epsilon:
             return random.randrange(self.action_size)  # Explore: random action
-        state = torch.FloatTensor(state).unsqueeze(0)
-        act_values = self.model(state)
-        return torch.argmax(act_values).item()  # Exploit: best action
+        return np.argmax(self.q_table.get(state, np.zeros(self.action_size)))  # Exploit: best action
 
-    # Train the model using replay memory
-    def replay(self, batch_size):
-        if len(self.memory) < batch_size:
-            return  # Not enough experiences to sample from
-        minibatch = random.sample(self.memory, batch_size)
-        for state, action, reward, next_state, done in minibatch:
-            target = reward
-            if not done:
-                next_state = torch.FloatTensor(next_state).unsqueeze(0)
-                # Q-learning target with discounted future reward
-                target = reward + self.gamma * torch.max(self.model(next_state)).item()
-            state = torch.FloatTensor(state).unsqueeze(0)
-            target_f = self.model(state).detach().clone()
-            target_f[0][action] = target  # Update Q-value for chosen action
-            self.model.train()
-            output = self.model(state)
-            loss = self.loss_fn(output, target_f)  # Compute loss
-            self.optimizer.zero_grad()
-            loss.backward()  # Backpropagation
-            self.optimizer.step()  # Gradient descent
-        # Decay exploration rate
+    def learn(self, state, action, reward, next_state, done):
+        state = tuple(state)
+        next_state = tuple(next_state)
+        old_value = self.q_table.get(state, np.zeros(self.action_size))[action] # Old Q-value
+        next_max = 0 if done else np.max(self.q_table.get(next_state, np.zeros(self.action_size))) # Next state max Q-value
+        new_value = old_value + self.learning_rate * (reward + self.discount_factor * next_max - old_value) # New Q-value
+        q_values = self.q_table.get(state, np.zeros(self.action_size))
+        q_values[action] = new_value
+        self.q_table[state] = q_values
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
 
 option = input("Enter 1 for training and saving, 2 for loading and testing\nor 3 for generating new test scenario:")
 if option == "1":
     nameFile = input("Enter the name of the file to save the model:")
-    nameFile = nameFile + ".pth"
+    nameFile = nameFile + ".pkl"
     # Initialize Kubernetes environment
     env = KubernetesEnv(num_nodes=5)
     state_size = len(env.reset())  # State space size
     action_size = env.num_nodes  # Action space size
-    agent = DQLAgent(state_size, action_size)
+    agent = QAgent(state_size, action_size)
     episodes = 500  # Total training episodes
-    batch_size = 32  # Batch size for experience replay
     # Training loop
     for e in range(episodes):
         state = env.reset()  # Reset environment at start of each episode
@@ -225,18 +184,17 @@ if option == "1":
             action = agent.act(state)  # Agent selects action
             next_state, reward, done, _ = env.step(action)  # Execute action
             # print data about the env
-            agent.remember(state, action, reward, next_state, done)  # Store experience
+            agent.learn(state, action, reward, next_state, done)  # Store experience
             state = next_state  # Move to next state
             if done:
                 print(f"Episode {e+1}/{episodes}, Score: {time}, Epsilon: {agent.epsilon:.2f}")
                 break  # End episode if done
-            if len(agent.memory) > batch_size:
-                agent.replay(batch_size)  # Train the agent
         for pod in env.pods:
             print(pod.getAssignedNode(), sep=" ")
         print()
-    torch.save(agent.model.state_dict(), nameFile)
-    print("Saved model")
+    with open(nameFile, 'wb') as f:
+        pickle.dump(agent.q_table, f)
+    print("Saved agent")
 elif option == "2":
     nameFile = input("Enter the name of the file to load the model:")
     nameFile = nameFile
@@ -244,18 +202,18 @@ elif option == "2":
     env = KubernetesEnv(num_nodes=5, readFile=True)
     state_size = len(env.reset())
     action_size = env.num_nodes
-    agent = DQLAgent(state_size, action_size)
-    agent.model.load_state_dict(torch.load(nameFile))
+    agent = QAgent(state_size, action_size)
+    with open(nameFile, 'rb') as f:
+        agent.q_table = pickle.load(f)
     print("Loaded agent")
-    agent.model.eval()
     # Testing the trained agent
     state = env.reset()
     # get current date and time in the format: YYYYMMDDHHMMSS
-    resultsName = datetime.now().strftime("%Y%m%d%H%M%S") + "DeepQLres.txt"
+    resultsName = datetime.now().strftime("%Y%m%d%H%M%S") + "QLres.txt"
     testResults = open(resultsName, "w")
     # copy values to test against default scheduler
-    print("DQN Scheduler")
-    testResults.write("DQN Scheduler\n")
+    print("QLearning Scheduler")
+    testResults.write("QLearning Scheduler\n")
     for time in range(100):  # Test for 20 steps
         # print state
         action = agent.act(state)  # Agent selects action
@@ -297,7 +255,7 @@ elif option == "2":
 elif option == "3":
     env = KubernetesEnv(num_nodes=5)
     # GET SAMPLE DATA
-    testFile = open("testData.txt", "w")
+    testFile = open("testDataQLearning.txt", "w")
     testFile.write(len(env.nodes).__str__() + "\n")
     for node in env.nodes:
         testFile.write(node['cpu'].__str__() + "\n")
