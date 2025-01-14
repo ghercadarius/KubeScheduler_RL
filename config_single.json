@@ -1,0 +1,7 @@
+{
+  "num_nodes": 7,
+  "episodes": 20,
+  "batch_size": 32,
+  "response_timeout": 5,
+  "model_file": "model_single.pth"
+}
