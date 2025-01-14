@@ -1,9 +1,12 @@
 import json
 import os
 import asyncio
+import pickle
+
 import torch
 from env import KubernetesEnv
 from dqn import DQNAgent
+from ql import QAgent
 import uuid
 import aiofiles
 from concurrent.futures import ProcessPoolExecutor
@@ -46,6 +49,27 @@ async def train_model(config):
     torch.save(agent.model.state_dict(), f"./models/{config["model_file"]}")
     print(f"Model saved to {config['model_file']}")
 
+async def train_ql_model(config):
+    env = KubernetesEnv(num_nodes=config["num_nodes"], response_timeout=config["response_timeout"])
+    state_size = len(env.reset())
+    action_size = env.num_nodes
+    agent = QAgent(state_size, action_size)
+    episodes = config["episodes"]
+
+    for e in range(episodes):
+        state = env.reset()
+        for time in range(50):
+            action = agent.act(state)
+            next_state, reward, done, _ = env.step(action)
+            agent.learn(state, action, reward, next_state, done)
+            state = next_state
+            if done:
+                print(f"Episode {e + 1}/{episodes}, Score: {time}, Epsilon: {agent.epsilon:.2f}")
+                break
+
+    with open(f"./models/{config["model_file"]}.pkl", 'wb') as f:
+        pickle.dump(agent.q_table, f)
+    print("Saved agent")
 
 async def run_model(config, config_index, results_folder):
     env = KubernetesEnv(num_nodes=config["num_nodes"], response_timeout=config["response_timeout"])
@@ -54,10 +78,8 @@ async def run_model(config, config_index, results_folder):
     agent = DQNAgent(state_size, action_size)
     agent.model.load_state_dict(torch.load(config["model_file"]))
     agent.model.eval()
-
     state = env.reset()
-
-    async with aiofiles.open(f"{results_folder}/res_{config_index}", "w") as f:
+    async with aiofiles.open(f"{results_folder}/dql/res_{config_index}", "w") as f:
         for time in range(100):
             action = agent.act(state)
             next_state, reward, done, _ = env.step(action)
@@ -75,6 +97,33 @@ async def run_model(config, config_index, results_folder):
                     await f.write(f"{node}\n")
                 break
 
+
+async def run_ql_model(config, config_index, results_folder):
+    env = KubernetesEnv(num_nodes=config["num_nodes"], response_timeout=config["response_timeout"])
+    state_size = len(env.reset())
+    action_size = env.num_nodes
+    agent = QAgent(state_size, action_size)
+    with open(f"./models/{config['model_file']}.pkl", 'rb') as f:
+        agent.q_table = pickle.load(f)
+    print("Loaded agent")
+    state = env.reset()
+    async with aiofiles.open(f"{results_folder}/ql/res_{config_index}", "w") as f:
+        for time in range(100):
+            action = agent.act(state)
+            next_state, reward, done, _ = env.step(action)
+            print(f"Step {time}: Action {action}, Reward {reward}")
+            state = next_state
+
+            if done:
+                for pod in env.pods:
+                    print(pod.getAssignedNode(), sep=" ")
+                    await f.write(f"{pod.getAssignedNode()}\n")
+                print("Nodes:")
+                await f.write("Nodes: \n")
+                for node in env.nodes:
+                    print(node)
+                    await f.write(f"{node}\n")
+                break
 
 # Wrap train_model in a sync function for process execution
 def train_model_sync(config):

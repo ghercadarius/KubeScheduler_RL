@@ -6,9 +6,9 @@ class QAgent:
         self.state_size = state_size  # Size of the state space
         self.action_size = action_size  # Size of the action space
         self.epsilon = 1.0  # Initial exploration rate
-        self.epsilon_min = 0.01  # Minimum exploration rate
+        self.epsilon_min = 0.1  # Minimum exploration rate
         self.epsilon_decay = 0.995  # Decay rate for exploration
-        self.learning_rate = 0.001  # Learning rate for optimizer
+        self.learning_rate = 0.005  # Learning rate for optimizer
         self.discount_factor = 0.95  # Discount factor for future rewards
         self.q_table = {} # Q-value table
 
