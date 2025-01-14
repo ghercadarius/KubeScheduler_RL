@@ -18,13 +18,13 @@ class KubernetesEnv:
                     'response_time': 0
                 })
             self.num_pods = int(testFile.readline())
-            self.pods = []
+            self.deploymentManifests = []
             for i in range(self.num_pods):
-                self.pods.append(kp.KubernetesPod())
-                self.pods[i].cpu = float(testFile.readline())
-                self.pods[i].gpu = float(testFile.readline())
-                self.pods[i].ram = float(testFile.readline())
-                self.pods[i].response_time_factor = float(testFile.readline())
+                self.deploymentManifests.append(kp.KubernetesPod())
+                self.deploymentManifests[i].cpu = float(testFile.readline())
+                self.deploymentManifests[i].gpu = float(testFile.readline())
+                self.deploymentManifests[i].ram = float(testFile.readline())
+                self.deploymentManifests[i].response_time_factor = float(testFile.readline())
             self.pod_order = list(map(int, testFile.readline().split()))
             self.actual_pod_index = 0
             testFile.close()
@@ -37,7 +37,7 @@ class KubernetesEnv:
 
     def reset(self):
         self.nodes = [self._generate_node_resources() for _ in range(self.num_nodes)]
-        self.pods = [kp.KubernetesPod() for _ in range(10)]
+        self.deploymentManifests = [kp.KubernetesPod() for _ in range(10)]
         return self._get_state()
 
     def _generate_node_resources(self):
@@ -54,10 +54,10 @@ class KubernetesEnv:
             state.extend([node['cpu'], node['gpu'], node['ram'], node['response_time']])
         # get a random pod
         if self.read_from_file:
-            self.podClass = self.pods[self.pod_order[self.actual_pod_index]]
+            self.podClass = self.deploymentManifests[self.pod_order[self.actual_pod_index]]
             self.actual_pod_index += 1
         else:
-            self.podClass = self.pods[random.randint(0, len(self.pods) - 1)]
+            self.podClass = self.deploymentManifests[random.randint(0, len(self.deploymentManifests) - 1)]
         self.pod = self.podClass.getState()
         state.extend([self.pod['cpu'], self.pod['gpu'], self.pod['ram']])
         return np.array(state, dtype=np.float32)

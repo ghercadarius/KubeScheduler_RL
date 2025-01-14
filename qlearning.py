@@ -31,7 +31,7 @@ if option == "1":
             if done:
                 print(f"Episode {e+1}/{episodes}, Score: {time}, Epsilon: {agent.epsilon:.2f}")
                 break  # End episode if done
-        for pod in env.pods:
+        for pod in env.deploymentManifests:
             print(pod.getAssignedNode(), sep=" ")
         print()
     with open(nameFile, 'wb') as f:
@@ -64,7 +64,7 @@ elif option == "2":
         testResults.write(f"Step {time}: Action {action}, Reward {reward}\n")
         state = next_state  # Update state
         if done:
-            for pod in env.pods:
+            for pod in env.deploymentManifests:
                 print(pod.getAssignedNode(), sep=" ")
                 testResults.write(pod.getAssignedNode().__str__() + "\n")
             testResults.write("Nodes:\n")
@@ -78,13 +78,13 @@ elif option == "2":
     env = ke.KubernetesEnv(num_nodes=5, readFile=True)
     default_scheduler = ks.DefaultScheduler(env)
     for time in range(100):
-        classPod = env.pods[random.randint(0, len(env.pods) - 1)]
+        classPod = env.deploymentManifests[random.randint(0, len(env.deploymentManifests) - 1)]
         env.pod = classPod.getState()
         action = default_scheduler.schedule(env.pod, classPod)
         testResults.write("Binded pod to node: " + action.__str__() + "\n")
         print("Binded pod to node: ", action)
         if action == -1:
-            for pod in env.pods:
+            for pod in env.deploymentManifests:
                 testResults.write(pod.getAssignedNode().__str__() + "\n")
                 print(pod.getAssignedNode(), sep=" ")
             testResults.write("Nodes:\n")
@@ -103,14 +103,14 @@ elif option == "3":
         testFile.write(node['cpu'].__str__() + "\n")
         testFile.write(node['gpu'].__str__() + "\n")
         testFile.write(node['ram'].__str__() + "\n")
-    testFile.write(len(env.pods).__str__() + "\n")
-    for pod in env.pods:
+    testFile.write(len(env.deploymentManifests).__str__() + "\n")
+    for pod in env.deploymentManifests:
         testFile.write(pod.cpu.__str__() + "\n")
         testFile.write(pod.gpu.__str__() + "\n")
         testFile.write(pod.ram.__str__() + "\n")
         testFile.write(pod.response_time_factor.__str__() + "\n")
     for ind in range(100):
-        randIndex = random.randint(0, len(env.pods) - 1)
+        randIndex = random.randint(0, len(env.deploymentManifests) - 1)
         testFile.write(randIndex.__str__() + " ")
     testFile.write("\n")
     testFile.close()
