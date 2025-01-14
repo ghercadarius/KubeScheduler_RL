@@ -1,0 +1,23 @@
+[
+  {
+    "num_nodes": 10,
+    "episodes": 200,
+    "batch_size": 32,
+    "response_timeout": 5,
+    "model_file": "data1.pth"
+  },
+  {
+    "num_nodes": 7,
+    "episodes": 20,
+    "batch_size": 32,
+    "response_timeout": 5,
+    "model_file": "data2.pth"
+  },
+  {
+    "num_nodes": 5,
+    "episodes": 1000,
+    "batch_size": 128,
+    "response_timeout": 10,
+    "model_file": "data3.pth"
+  }
+]
