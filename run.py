@@ -10,6 +10,7 @@ from ql import QAgent
 import uuid
 import aiofiles
 from concurrent.futures import ProcessPoolExecutor
+import matplotlib.pyplot as plt
 
 import logging
 
@@ -49,6 +50,7 @@ async def train_model(config):
     torch.save(agent.model.state_dict(), f"./models/{config["model_file"]}")
     print(f"Model saved to {config['model_file']}")
 
+
 async def train_ql_model(config):
     env = KubernetesEnv(num_nodes=config["num_nodes"], response_timeout=config["response_timeout"])
     state_size = len(env.reset())
@@ -71,12 +73,13 @@ async def train_ql_model(config):
         pickle.dump(agent.q_table, f)
     print("Saved agent")
 
+
 async def run_model(config, config_index, results_folder):
     env = KubernetesEnv(num_nodes=config["num_nodes"], response_timeout=config["response_timeout"])
     state_size = len(env.reset())
     action_size = env.num_nodes
     agent = DQNAgent(state_size, action_size)
-    agent.model.load_state_dict(torch.load(config["model_file"]))
+    agent.model.load_state_dict(torch.load(f"./models/{config["model_file"]}"))
     agent.model.eval()
     state = env.reset()
     async with aiofiles.open(f"{results_folder}/dql/res_{config_index}", "w") as f:
@@ -92,10 +95,9 @@ async def run_model(config, config_index, results_folder):
                     await f.write(f"{pod.getAssignedNode()}\n")
                 print("Nodes:")
                 await f.write("Nodes: \n")
-                for node in env.nodes:
-                    print(node)
-                    await f.write(f"{node}\n")
+                await print_data(env, f)
                 break
+    return env
 
 
 async def run_ql_model(config, config_index, results_folder):
@@ -118,18 +120,51 @@ async def run_ql_model(config, config_index, results_folder):
                 for pod in env.pods:
                     print(pod.getAssignedNode(), sep=" ")
                     await f.write(f"{pod.getAssignedNode()}\n")
-                print("Nodes:")
+                print("[QL] Nodes:")
                 await f.write("Nodes: \n")
-                for node in env.nodes:
-                    print(node)
-                    await f.write(f"{node}\n")
+
+                await print_data(env, f)
+
                 break
+    return env
+
+
+async def print_data(env, f):
+    max_node_response_time = 0
+    min_node_response_time = 100
+    for node in env.nodes:
+        print(node)
+        if node['response_time'] > max_node_response_time:
+            max_node_response_time = node['response_time']
+        if node['response_time'] < min_node_response_time:
+            min_node_response_time = node['response_time']
+        await f.write(f"{node}\n")
+    diff = max_node_response_time - min_node_response_time
+    await f.write(f"Max response time: {max_node_response_time}\n")
+    await f.write(f"Min response time: {min_node_response_time}\n")
+    await f.write(f"Diff: {diff}\n")
+    # calculate median response time
+    response_times = [node['response_time'] for node in env.nodes]
+    response_times.sort()
+    median = response_times[len(response_times) // 2]
+    await f.write(f"Median response time: {median}\n")
+    # average
+    average = sum(response_times) / len(response_times)
+    await f.write(f"Average response time: {average}\n")
+
 
 # Wrap train_model in a sync function for process execution
 def train_model_sync(config):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     loop.run_until_complete(train_model(config))
+    loop.close()
+
+
+def train_ql_model_sync(config):
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(train_ql_model(config))
     loop.close()
 
 
@@ -140,17 +175,74 @@ async def train_model_safe(config):
         await loop.run_in_executor(executor, train_model_sync, config)
 
 
+async def train_ql_model_safe(config):
+    loop = asyncio.get_event_loop()
+    with ProcessPoolExecutor() as executor:
+        await loop.run_in_executor(executor, train_ql_model_sync, config)
+
+
 async def agent_task(config, config_index, results_folder):
     if not os.listdir("./models").__contains__(config["model_file"], ):
         await train_model_safe(config)
+    if not os.listdir("./models").__contains__(f"{config['model_file']}.pkl"):
+        await train_ql_model_safe(config)
 
-    await run_model(config, config_index, results_folder)
+    env_dql = await run_model(config, config_index, results_folder)
+    env_ql = await run_ql_model(config, config_index, results_folder)
+    plot_response_time(env_dql, env_ql)
 
+#Given two envs, create a plot function that compares the response time of each node in each env
+import matplotlib.pyplot as plt
+
+def plot_response_time(env_dql, env_ql):
+    # Create a dictionary to store response times for each environment
+    response_times_dql = {}
+    response_times_ql = {}
+
+    # Populate response times for env_dql
+    for i, node in enumerate(env_dql.nodes):
+        response_times_dql[i] = node['response_time']
+
+    # Populate response times for env_ql
+    for i, node in enumerate(env_ql.nodes):
+        response_times_ql[i] = node['response_time']
+
+    # Plot response times for env_dql (blue)
+    plt.plot(
+        list(response_times_dql.keys()),
+        list(response_times_dql.values()),
+        marker='o',
+        color='blue',
+        label='DQL Environment'
+    )
+
+    # Plot response times for env_ql (red)
+    plt.plot(
+        list(response_times_ql.keys()),
+        list(response_times_ql.values()),
+        marker='x',
+        color='red',
+        label='QL Environment'
+    )
+
+    # Customize the plot
+    plt.xlabel("Node Index")
+    plt.ylabel("Response Time")
+    plt.title("Response Times per Node")
+    plt.legend()
+    plt.xticks(
+        ticks=list(response_times_dql.keys()),
+        labels=list(response_times_dql.keys())
+    )
+    plt.grid(True)
+    plt.show()
 
 async def main():
     config_file = "config_multi.json"
     results_folder = f'results_{uuid.uuid4()}'
     os.makedirs(results_folder, exist_ok=True)
+    os.makedirs(f"{results_folder}/dql", exist_ok=True)
+    os.makedirs(f"{results_folder}/ql", exist_ok=True)
     config = load_config(config_file)
     tasks = []
     if isinstance(config, list):

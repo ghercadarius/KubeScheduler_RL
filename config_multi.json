@@ -19,5 +19,19 @@
     "batch_size": 128,
     "response_timeout": 10,
     "model_file": "data3.pth"
+  },
+  {
+    "num_nodes": 10,
+    "episodes": 15,
+    "batch_size": 32,
+    "response_timeout": 10,
+    "model_file": "data4.pth"
+  },
+  {
+    "num_nodes": 10,
+    "episodes": 25,
+    "batch_size": 32,
+    "response_timeout": 10,
+    "model_file": "data5.pth"
   }
 ]
